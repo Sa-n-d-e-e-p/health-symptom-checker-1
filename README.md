@@ -8,12 +8,9 @@
 
 **Live Demo: [https://health-symptom-checker-1.vercel.app/](https://health-symptom-checker-1.vercel.app/)**
 
-> ⚠️ **Note for Users:** The backend API is hosted on Render's free tier. If the application has been inactive for 15+ minutes, the first API request (e.g., your first time logging in or registering) may take **30-50 seconds** to complete while the backend instance cold-starts. Subsequent requests will be instant.
+> ⚠️ **Note for Users:** The backend API is hosted on Render's free tier. If the application has been inactive for 15+ minutes, the first API request (e.g., your first time logging in or registering) may take **30-50 seconds** to complete while the backend instance cold-starts. Subsequent requests will be instant. Also, symptom analysis uses free-tier LLM API keys, so in rare cases pressing **Analyze Symptoms** may show a temporary error due to provider rate limits or high demand.
 
-## 📹 Demo Video
 
-- Add your placement demo video link here: [Watch Demo Video](https://your-video-link-here)
-- Example: YouTube unlisted link, Loom link, or Google Drive share link.
 
 ## 🚀 Recent Updates
 
