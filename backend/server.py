@@ -5,6 +5,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 import json
+import asyncio
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List
@@ -12,6 +13,7 @@ import uuid
 from datetime import datetime, timezone
 from google import genai
 from google.genai import types
+from groq import AsyncGroq
 from passlib.context import CryptContext
 from jose import jwt, JWTError
 
@@ -141,6 +143,47 @@ def doc_to_response(doc: dict) -> SymptomCheckResponse:
     )
 
 
+def clean_and_parse_llm_json(response_text: str) -> dict:
+    cleaned = response_text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("```")[1]
+        if cleaned.startswith("json"):
+            cleaned = cleaned[4:]
+    cleaned = cleaned.strip()
+    return json.loads(cleaned)
+
+
+async def generate_with_gemini(prompt: str) -> str:
+    gemini_key = os.environ.get("GEMINI_API_KEY")
+    if not gemini_key:
+        raise ValueError("GEMINI_API_KEY missing")
+
+    client = genai.Client(api_key=gemini_key)
+    response = await client.aio.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
+        config=types.GenerateContentConfig(system_instruction=SYSTEM_MESSAGE),
+    )
+    return response.text or ""
+
+
+async def generate_with_groq(prompt: str) -> str:
+    groq_key = os.environ.get("GROQ_API_KEY")
+    if not groq_key:
+        raise ValueError("GROQ_API_KEY missing")
+
+    client = AsyncGroq(api_key=groq_key)
+    completion = await client.chat.completions.create(
+        model="llama-3.1-8b-instant",
+        messages=[
+            {"role": "system", "content": SYSTEM_MESSAGE},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.2,
+    )
+    return completion.choices[0].message.content or ""
+
+
 # --- Routes ---
 @api_router.get("/")
 async def root():
@@ -194,39 +237,48 @@ async def check_symptoms(input: SymptomInput, current_user: dict = Depends(get_c
     if not input.symptoms or len(input.symptoms.strip()) < 5:
         raise HTTPException(status_code=400, detail="Please provide a meaningful symptom description.")
 
-    llm_key = os.environ.get("GEMINI_API_KEY")
-    if not llm_key:
-        raise HTTPException(status_code=500, detail="LLM API key not configured. Set GEMINI_API_KEY environment variable.")
-
     try:
-        client = genai.Client(api_key=llm_key)
-        
         prompt = f"Based on these symptoms, suggest possible conditions and next steps with educational disclaimer: {input.symptoms}"
         profile = current_user.get("profile")
         if profile and profile.get("age") and profile.get("gender"):
             patient_context = f"Patient context: {profile.get('age')} year old {profile.get('gender')}. Pre-existing conditions: {profile.get('pre_existing_conditions', 'None reported')}."
             prompt = f"{patient_context}\n\n{prompt}"
             logger.info(f"Injecting medical profile into prompt: {patient_context}")
+        response_text = ""
+        parsed = None
+        llm_errors = []
 
-        response = await client.aio.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_MESSAGE
+        gemini_key = os.environ.get("GEMINI_API_KEY")
+        if gemini_key:
+            for attempt in range(1, 3):
+                try:
+                    response_text = await generate_with_gemini(prompt)
+                    logger.info(f"Gemini raw response: {response_text[:200]}")
+                    parsed = clean_and_parse_llm_json(response_text)
+                    logger.info("Generated symptom analysis using Gemini")
+                    break
+                except Exception as e:
+                    llm_errors.append(f"Gemini attempt {attempt}: {e}")
+                    logger.warning(f"Gemini attempt {attempt} failed: {e}")
+                    if attempt < 2:
+                        await asyncio.sleep(1.5)
+
+        if parsed is None and os.environ.get("GROQ_API_KEY"):
+            try:
+                response_text = await generate_with_groq(prompt)
+                logger.info(f"Groq raw response: {response_text[:200]}")
+                parsed = clean_and_parse_llm_json(response_text)
+                logger.info("Generated symptom analysis using Groq fallback")
+            except Exception as e:
+                llm_errors.append(f"Groq fallback: {e}")
+                logger.warning(f"Groq fallback failed: {e}")
+
+        if parsed is None:
+            joined_errors = " | ".join(llm_errors) if llm_errors else "No LLM providers configured."
+            raise HTTPException(
+                status_code=503,
+                detail=f"AI providers are currently unavailable. {joined_errors}",
             )
-        )
-        response_text = response.text
-        logger.info(f"LLM raw response: {response_text[:200]}")
-
-        # Strip any markdown fences if present
-        cleaned = response_text.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.split("```")[1]
-            if cleaned.startswith("json"):
-                cleaned = cleaned[4:]
-        cleaned = cleaned.strip()
-
-        parsed = json.loads(cleaned)
 
         is_emergency = parsed.get("is_emergency", False)
         conditions = [Condition(**c) for c in parsed.get("conditions", [])]
@@ -236,6 +288,8 @@ async def check_symptoms(input: SymptomInput, current_user: dict = Depends(get_c
     except json.JSONDecodeError as e:
         logger.error(f"JSON parse error: {e} | response: {response_text}")
         raise HTTPException(status_code=500, detail="Failed to parse AI response. Please try again.")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"LLM error: {e}")
         raise HTTPException(status_code=500, detail=f"AI service error: {str(e)}")

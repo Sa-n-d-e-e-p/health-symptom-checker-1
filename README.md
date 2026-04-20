@@ -10,11 +10,24 @@
 
 > ⚠️ **Note for Users:** The backend API is hosted on Render's free tier. If the application has been inactive for 15+ minutes, the first API request (e.g., your first time logging in or registering) may take **30-50 seconds** to complete while the backend instance cold-starts. Subsequent requests will be instant.
 
+## 📹 Demo Video
+
+- Add your placement demo video link here: [Watch Demo Video](https://your-video-link-here)
+- Example: YouTube unlisted link, Loom link, or Google Drive share link.
+
+## 🚀 Recent Updates
+
+- Added **provider failover** in backend: tries **Gemini** first and falls back to **Groq** automatically if Gemini is unavailable.
+- Added **retry handling** for intermittent Gemini failures (e.g., `503 UNAVAILABLE`) before using fallback.
+- Improved API error behavior to return a clearer **service unavailable** response when both providers fail.
+- Updated backend dependencies with `groq` SDK support.
+
 ## ✨ Key Features & Architecture
 
 ## ✨ Features
 
 - **Advanced AI Integration**: Powered by Google's `google-genai` SDK and the ultra-fast `gemini-2.5-flash` model. Enforces strict JSON schema generation to ensure deterministic frontend parsing and reliable, formatted health insights without raw text unpredictable outputs.
+- **LLM Fallback Reliability**: Automatically falls back to Groq (`llama-3.1-8b-instant`) when Gemini is rate-limited or temporarily unavailable, improving demo and production stability.
 - **Context-Aware Medical Profiles**: Users can save Age, Gender, and Pre-existing Conditions, which are invisibly injected into the AI context to provide highly personalized and accurate medical insights. This heavily reduces AI hallucinations and ensures condition likelihoods are safely tailored to the patient's individual demographics.
 - **Emergency Triage Engine**: Automatically flags critical or life-threatening symptoms and overrides the UI with a pulsing emergency banner. It actively prevents patients from mistaking serious acute symptoms for minor illnesses by directing them immediately to emergency services.
 - **User Authentication**: Secure JSON Web Token (JWT) identity system utilizing `passlib` and `bcrypt` password hashing. Data is strictly scoped to the logged-in user, guaranteeing absolute database-level data isolation and privacy protection for sensitive condition history.
@@ -53,6 +66,7 @@ The application is containerized. To instantly start it without installing any l
 2. In the root directory, create a `.env` file for the backend containers.
    ```bash
    GEMINI_API_KEY="your_actual_key_here"
+   GROQ_API_KEY="your_groq_key_here"
    MONGO_URL="mongodb+srv://..."
    DB_NAME="healthcare"
    JWT_SECRET_KEY="any_long_random_string_here"
@@ -70,23 +84,25 @@ The application is containerized. To instantly start it without installing any l
 If you prefer to run it locally for development, ensure you have **Node.js (v18+)** and **Python (v3.10+)** installed.
 
 ### 1. Database & Cloud Services
-You will need two pieces of credentials to run this application:
+You will need these credentials to run this application:
 1. **Google Gemini API Key**: Get a free key from [Google AI Studio](https://aistudio.google.com/app/apikey).
-2. **MongoDB Atlas Connection**: Get your connection string from MongoDB Atlas. Be sure to whitelist your IP (`0.0.0.0/0`) in the Atlas **Network Access** tab.
+2. **Groq API Key (optional but recommended)**: Used as automatic fallback if Gemini is unavailable.
+3. **MongoDB Atlas Connection**: Get your connection string from MongoDB Atlas. Be sure to whitelist your IP (`0.0.0.0/0`) in the Atlas **Network Access** tab.
 
 ### 2. Start the Backend Server (Terminal 1)
 
 Navigate to the backend directory and activate an isolated Python environment:
 ```bash
 cd backend
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Export your required environment variables (or put them in `backend/.env`):
+Export your required environment variables:
 ```bash
 export GEMINI_API_KEY="your_actual_key_here"
+export GROQ_API_KEY="your_groq_key_here"
 export MONGO_URL="mongodb+srv://..."
 export DB_NAME="healthcare"
 export JWT_SECRET_KEY="any_long_random_string_here"
@@ -94,7 +110,7 @@ export JWT_SECRET_KEY="any_long_random_string_here"
 
 Start the FastAPI application:
 ```bash
-uvicorn server:app --reload --host 0.0.0.0 --port 8000
+python -m uvicorn server:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ### 3. Start the Frontend Application (Terminal 2)
